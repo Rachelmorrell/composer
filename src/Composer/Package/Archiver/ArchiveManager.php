@@ -13,10 +13,10 @@
 namespace Composer\Package\Archiver;
 
 use Composer\Downloader\DownloadManager;
-use Composer\Package\PackageInterface;
 use Composer\Package\RootPackageInterface;
 use Composer\Util\Filesystem;
 use Composer\Util\Loop;
+use Composer\Util\SyncHelper;
 use Composer\Json\JsonFile;
 use Composer\Package\CompletePackageInterface;
 
@@ -150,8 +150,9 @@ class ArchiveManager
             try {
                 // Download sources
                 $promise = $this->downloadManager->download($package, $sourcePath);
-                $this->loop->wait(array($promise));
-                $this->downloadManager->install($package, $sourcePath);
+                SyncHelper::await($this->loop, $promise);
+                $promise = $this->downloadManager->install($package, $sourcePath);
+                SyncHelper::await($this->loop, $promise);
             } catch (\Exception $e) {
                 $filesystem->removeDirectory($sourcePath);
                 throw  $e;

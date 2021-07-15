@@ -24,6 +24,7 @@ use Composer\Util\IniHelper;
 use Composer\Util\ProcessExecutor;
 use Composer\Util\HttpDownloader;
 use Composer\Util\StreamContextFactory;
+use Composer\Util\Platform;
 use Composer\SelfUpdate\Keys;
 use Composer\SelfUpdate\Versions;
 use Composer\IO\NullIO;
@@ -176,9 +177,18 @@ EOT
 
         $finder = new ExecutableFinder;
         $hasSystemUnzip = (bool) $finder->find('unzip');
+        $bin7zip = '';
+        if ($hasSystem7zip = (bool) $finder->find('7z', null, array('C:\Program Files\7-Zip'))) {
+            $bin7zip = '7z';
+        }
+        if (!Platform::isWindows() && !$hasSystem7zip && $hasSystem7zip = (bool) $finder->find('7zz')) {
+            $bin7zip = '7zz';
+        }
+
         $io->write(
             'zip: ' . (extension_loaded('zip') ? '<comment>extension present</comment>' : '<comment>extension not loaded</comment>')
             . ', ' . ($hasSystemUnzip ? '<comment>unzip present</comment>' : '<comment>unzip not available</comment>')
+            . ', ' . ($hasSystem7zip ? '<comment>7-Zip present ('.$bin7zip.')</comment>' : '<comment>7-Zip not available</comment>')
         );
 
         return $this->exitCode;
@@ -404,7 +414,7 @@ EOT
     }
 
     /**
-     * @param bool|string|\Exception $result
+     * @param bool|string|string[]|\Exception $result
      */
     private function outputResult($result)
     {

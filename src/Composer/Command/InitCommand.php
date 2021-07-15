@@ -14,6 +14,7 @@ namespace Composer\Command;
 
 use Composer\Factory;
 use Composer\Json\JsonFile;
+use Composer\Json\JsonValidationException;
 use Composer\Package\BasePackage;
 use Composer\Package\CompletePackageInterface;
 use Composer\Package\Package;
@@ -27,6 +28,7 @@ use Composer\Repository\RepositorySet;
 use Composer\Util\Filesystem;
 use Composer\Util\ProcessExecutor;
 use Composer\Semver\Constraint\Constraint;
+use Composer\Util\Silencer;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -95,6 +97,12 @@ EOT
         $allowlist = array('name', 'description', 'author', 'type', 'homepage', 'require', 'require-dev', 'stability', 'license', 'autoload');
         $options = array_filter(array_intersect_key($input->getOptions(), array_flip($allowlist)));
 
+        if (isset($options['name']) && !preg_match('{^[a-z0-9_.-]+/[a-z0-9_.-]+$}D', $options['name'])) {
+            throw new \InvalidArgumentException(
+                'The package name '.$options['name'].' is invalid, it should be lowercase and have a vendor name, a forward slash, and a package name, matching: [a-z0-9_.-]+/[a-z0-9_.-]+'
+            );
+        }
+
         if (isset($options['author'])) {
             $options['authors'] = $this->formatAuthors($options['author']);
             unset($options['author']);
@@ -133,7 +141,7 @@ EOT
             $options['autoload'] = (object) array(
                 'psr-4' => array(
                     $namespace . '\\' => $autoloadPath,
-                )
+                ),
             );
         }
 
@@ -152,10 +160,20 @@ EOT
                 throw new \RuntimeException('You have to run this command in interactive mode, or specify at least some data using --name, --require, etc.');
             }
 
-            $io->writeError('Writing composer.json');
+            $io->writeError('Writing '.$file->getPath());
         }
 
         $file->write($options);
+        try {
+            $file->validateSchema(JsonFile::LAX_SCHEMA);
+        } catch (JsonValidationException $e) {
+            $io->writeError('<error>Schema validation error, aborting</error>');
+            $errors = ' - ' . implode(PHP_EOL . ' - ', $e->getErrors());
+            $io->writeError($e->getMessage() . ':' . PHP_EOL . $errors);
+            Silencer::call('unlink', $file->getPath());
+
+            return 1;
+        }
 
         // --autoload - Create src folder
         if ($autoloadPath) {
@@ -273,12 +291,6 @@ EOT
                 $name .= '/' . $name;
             }
             $name = strtolower($name);
-        } else {
-            if (!preg_match('{^[a-z0-9_.-]+/[a-z0-9_.-]+$}D', $name)) {
-                throw new \InvalidArgumentException(
-                    'The package name '.$name.' is invalid, it should be lowercase and have a vendor name, a forward slash, and a package name, matching: [a-z0-9_.-]+/[a-z0-9_.-]+'
-                );
-            }
         }
 
         $name = $io->askAndValidate(
@@ -444,7 +456,6 @@ EOT
             $autoload
         );
         $input->setOption('autoload', $autoload);
-
     }
 
     /**
@@ -673,9 +684,10 @@ EOT
         }
 
         $namespace = array_map(
-            function($part) {
+            function ($part) {
                 $part = preg_replace('/[^a-z0-9]/i', ' ', $part);
                 $part = ucwords($part);
+
                 return str_replace(' ', '', $part);
             },
             explode('/', $packageName)
@@ -796,7 +808,7 @@ EOT
         }
 
         $file = Factory::getComposerFile();
-        if (is_file($file) && is_readable($file) && is_array($composer = json_decode(file_get_contents($file), true))) {
+        if (is_file($file) && Filesystem::isReadable($file) && is_array($composer = json_decode(file_get_contents($file), true))) {
             if (!empty($composer['minimum-stability'])) {
                 return VersionParser::normalizeStability($composer['minimum-stability']);
             }
@@ -889,6 +901,13 @@ EOT
             // Check for similar names/typos
             $similar = $this->findSimilar($name);
             if ($similar) {
+                if (in_array($name, $similar, true)) {
+                    throw new \InvalidArgumentException(sprintf(
+                        "Could not find package %s. It was however found via repository search, which indicates a consistency issue with the repository.",
+                        $name
+                    ));
+                }
+
                 throw new \InvalidArgumentException(sprintf(
                     "Could not find package %s.\n\nDid you mean " . (count($similar) > 1 ? 'one of these' : 'this') . "?\n    %s",
                     $name,

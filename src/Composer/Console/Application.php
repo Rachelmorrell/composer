@@ -13,6 +13,7 @@
 namespace Composer\Console;
 
 use Composer\IO\NullIO;
+use Composer\Util\Filesystem;
 use Composer\Util\Platform;
 use Composer\Util\Silencer;
 use Symfony\Component\Console\Application as BaseApplication;
@@ -142,8 +143,7 @@ class Application extends BaseApplication
 
         if ($input->hasParameterOption('--no-cache')) {
             $io->writeError('Disabling cache usage', true, IOInterface::DEBUG);
-            $_SERVER['COMPOSER_CACHE_DIR'] = Platform::isWindows() ? 'nul' : '/dev/null';
-            putenv('COMPOSER_CACHE_DIR='.$_SERVER['COMPOSER_CACHE_DIR']);
+            Platform::putEnv('COMPOSER_CACHE_DIR', Platform::isWindows() ? 'nul' : '/dev/null');
         }
 
         // switch working dir
@@ -282,7 +282,7 @@ class Application extends BaseApplication
 
             // add non-standard scripts as own commands
             $file = Factory::getComposerFile();
-            if (is_file($file) && is_readable($file) && is_array($composer = json_decode(file_get_contents($file), true))) {
+            if (is_file($file) && Filesystem::isReadable($file) && is_array($composer = json_decode(file_get_contents($file), true))) {
                 if (isset($composer['scripts']) && is_array($composer['scripts'])) {
                     foreach ($composer['scripts'] as $script => $dummy) {
                         if (!defined('Composer\Script\ScriptEvents::'.str_replace('-', '_', strtoupper($script)))) {
@@ -420,9 +420,9 @@ class Application extends BaseApplication
                     exit(1);
                 }
             } catch (JsonValidationException $e) {
-                $errors = ' - ' . implode(PHP_EOL . ' - ', $e->getErrors());
-                $message = $e->getMessage() . ':' . PHP_EOL . $errors;
-                throw new JsonValidationException($message);
+                if ($required) {
+                    throw $e;
+                }
             }
         }
 
@@ -486,6 +486,7 @@ class Application extends BaseApplication
             new Command\OutdatedCommand(),
             new Command\CheckPlatformReqsCommand(),
             new Command\FundCommand(),
+            new Command\ReinstallCommand(),
         ));
 
         if (strpos(__FILE__, 'phar:') === 0) {
